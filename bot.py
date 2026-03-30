@@ -33,7 +33,7 @@ bot = discord.Bot(
         type=discord.ActivityType.watching,
         name="your habits | /habit add"
     ),
-    status=discord.Status.online,
+    status=discord.Status.dnd,
 )
 
 # ─── Events ──────────────────────────────────────────────────────────

@@ -117,24 +117,30 @@ def create_poll_embed(habit: dict, day_number: int) -> discord.Embed:
     return embed
 
 
-# ─── Response Embeds ─────────────────────────────────────────────────
+# ─── Response Embeds (with Daily Report) ─────────────────────────────
 
-def create_success_embed(habit: dict) -> discord.Embed:
-    """Embed for successful habit response."""
+def _add_daily_report_fields(embed: discord.Embed, habit: dict):
+    """Add daily progress report fields to any response embed."""
+    from datetime import timedelta
+
+    # Calculate day number
+    created_at = habit.get("created_at")
+    if created_at:
+        if hasattr(created_at, 'tzinfo') and created_at.tzinfo is None:
+            created_at = TIMEZONE.localize(created_at)
+        day_number = min((datetime.now(TIMEZONE) - created_at).days + 1, CHALLENGE_DURATION)
+    else:
+        day_number = habit.get("total_days_completed", 0)
+
     is_good = habit["type"] == GOOD_HABIT
 
-    if is_good:
-        title = f"{EMOJI_CHECK} Great job! Habit completed!"
-        desc = f"**{habit['name']}** — streak continues!"
-    else:
-        title = f"{EMOJI_SHIELD} Excellent! You resisted!"
-        desc = f"**{habit['name']}** — you stayed strong!"
-
-    embed = discord.Embed(
-        title=title,
-        description=desc,
-        color=COLOR_SUCCESS
+    # ── Stats Row ──
+    embed.add_field(
+        name=f"\n{'━' * 28}\n{EMOJI_CHART} TODAY'S DAILY REPORT",
+        value="\u200b",
+        inline=False
     )
+
     embed.add_field(
         name=f"{EMOJI_FIRE} Current Streak",
         value=f"**{habit['current_streak']}** days",
@@ -146,71 +152,116 @@ def create_success_embed(habit: dict) -> discord.Embed:
         inline=True
     )
     embed.add_field(
-        name=f"{EMOJI_CHART} Total Days",
-        value=f"**{habit['total_days_completed']}** / {CHALLENGE_DURATION}",
+        name=f"{EMOJI_HOURGLASS} Day",
+        value=f"**{day_number}** / {CHALLENGE_DURATION}",
         inline=True
     )
 
+    embed.add_field(
+        name=f"{EMOJI_CHECK} Days Completed",
+        value=f"**{habit['total_days_completed']}**",
+        inline=True
+    )
+    embed.add_field(
+        name=f"{EMOJI_WARNING} Resets",
+        value=f"**{habit['resets']}**",
+        inline=True
+    )
+    if not is_good:
+        embed.add_field(
+            name=f"{EMOJI_SKULL} Penalties",
+            value=f"**{habit['total_penalties']}**",
+            inline=True
+        )
+
+    # ── Progress Bar ──
+    embed.add_field(
+        name=f"\n{EMOJI_CHART} Overall Progress",
+        value=_progress_bar(habit["total_days_completed"], CHALLENGE_DURATION),
+        inline=False
+    )
+
+    # ── Daily Log Calendar ──
+    if habit.get("daily_log") and created_at:
+        grid = _daily_log_grid(habit["daily_log"], created_at)
+        legend = f"{EMOJI_CHECK}=Done  {EMOJI_CROSS}=Missed  {EMOJI_SKIP}=Pending"
+        embed.add_field(
+            name=f"{EMOJI_CALENDAR} 30-Day Calendar",
+            value=f"{grid}\n{legend}",
+            inline=False
+        )
+
+    # ── Motivational Quote ──
+    quote = random.choice(MOTIVATIONAL_QUOTES)
+    embed.add_field(
+        name=f"{EMOJI_SPARKLE} Keep Going!",
+        value=f"*{quote}*",
+        inline=False
+    )
+
+    embed.set_footer(text=f"Day {day_number}/{CHALLENGE_DURATION} • {habit['total_days_completed']} days completed")
+    embed.timestamp = datetime.now(TIMEZONE)
+
+
+def create_success_embed(habit: dict) -> discord.Embed:
+    """Embed for successful habit response — includes daily report."""
+    is_good = habit["type"] == GOOD_HABIT
+
+    if is_good:
+        title = f"{EMOJI_CHECK} Great job! Habit completed!"
+        desc = (
+            f"**{habit['name']}** — streak continues! {EMOJI_FIRE}\n\n"
+            f"You're on a **{habit['current_streak']}-day streak**! Keep it up!"
+        )
+    else:
+        title = f"{EMOJI_SHIELD} Excellent! You resisted!"
+        desc = (
+            f"**{habit['name']}** — you stayed strong! {EMOJI_FIRE}\n\n"
+            f"**{habit['current_streak']} days** without giving in! Incredible willpower!"
+        )
+
+    embed = discord.Embed(
+        title=title,
+        description=desc,
+        color=COLOR_SUCCESS
+    )
+
+    _add_daily_report_fields(embed, habit)
     return embed
 
 
 def create_reset_embed(habit: dict) -> discord.Embed:
-    """Embed for when a good habit is missed (streak reset)."""
+    """Embed for when a good habit is missed — includes daily report."""
     embed = discord.Embed(
         title=f"{EMOJI_BROKEN} Streak Reset",
         description=(
             f"**{habit['name']}** — you missed today.\n"
             f"Your streak has been reset to **0 days**.\n\n"
+            f"You've completed **{habit['total_days_completed']}** out of **{CHALLENGE_DURATION}** days so far.\n"
             f"Don't give up! Start building your streak again tomorrow! {EMOJI_MUSCLE}"
         ),
         color=COLOR_FAILURE
     )
-    embed.add_field(
-        name=f"{EMOJI_WARNING} Total Resets",
-        value=f"**{habit['resets']}**",
-        inline=True
-    )
-    embed.add_field(
-        name=f"{EMOJI_TROPHY} Best Streak",
-        value=f"**{habit['best_streak']}** days",
-        inline=True
-    )
-    embed.add_field(
-        name=f"{EMOJI_CHART} Total Days Completed",
-        value=f"**{habit['total_days_completed']}** / {CHALLENGE_DURATION}",
-        inline=True
-    )
 
+    _add_daily_report_fields(embed, habit)
     return embed
 
 
 def create_penalty_embed(habit: dict) -> discord.Embed:
-    """Embed for when a bad habit is relapsed (penalty)."""
+    """Embed for when a bad habit is relapsed — includes daily report."""
     embed = discord.Embed(
         title=f"{EMOJI_SKULL} Relapse Detected!",
         description=(
             f"**{habit['name']}** — you gave in today.\n"
             f"A **penalty** has been recorded and your streak resets to **0**.\n\n"
+            f"Total penalties so far: **{habit['total_penalties']}**\n"
+            f"You've still completed **{habit['total_days_completed']}** out of **{CHALLENGE_DURATION}** days.\n"
             f"It's okay, dust yourself off and fight again tomorrow! {EMOJI_MUSCLE}"
         ),
         color=COLOR_FAILURE
     )
-    embed.add_field(
-        name=f"{EMOJI_WARNING} Total Penalties",
-        value=f"**{habit['total_penalties']}**",
-        inline=True
-    )
-    embed.add_field(
-        name=f"{EMOJI_WARNING} Total Resets",
-        value=f"**{habit['resets']}**",
-        inline=True
-    )
-    embed.add_field(
-        name=f"{EMOJI_TROPHY} Best Streak",
-        value=f"**{habit['best_streak']}** days",
-        inline=True
-    )
 
+    _add_daily_report_fields(embed, habit)
     return embed
 
 

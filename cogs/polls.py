@@ -10,7 +10,7 @@ import asyncio
 
 from utils.firebase_client import (
     get_all_active_users_with_habits, get_habits_needing_poll,
-    record_response, record_missed_response
+    record_response, record_missed_response, get_all_habits
 )
 from utils.embeds import (
     create_poll_embed, create_success_embed,
@@ -248,6 +248,53 @@ class Polls(commands.Cog):
         await self.bot.wait_until_ready()
         # Wait 1 hour after start before first check
         await asyncio.sleep(3600)
+
+    @commands.slash_command(name="test_poll", description="[Test] Receive your daily poll right now, regardless of the time")
+    async def test_poll(self, ctx: discord.ApplicationContext):
+        """Force send today's poll to the user running the command for testing."""
+        await ctx.defer(ephemeral=True)
+
+        try:
+            habits = get_all_habits(str(ctx.author.id), active_only=True)
+            if not habits:
+                await ctx.followup.send("❌ You don't have any active habits. Use `/habit add` first.", ephemeral=True)
+                return
+
+            polls_sent = 0
+            for habit in habits:
+                # Calculate day number
+                created_at = habit["created_at"]
+                if hasattr(created_at, 'tzinfo') and created_at.tzinfo is None:
+                    created_at = TIMEZONE.localize(created_at)
+                day_number = min(
+                    (datetime.now(TIMEZONE) - created_at).days + 1,
+                    CHALLENGE_DURATION
+                )
+
+                # Create poll embed and view
+                embed = create_poll_embed(habit, day_number)
+                view = HabitPollView(str(ctx.author.id), habit["id"], habit["type"])
+
+                try:
+                    await ctx.author.send(embed=embed, view=view)
+                    self.active_views[f"{ctx.author.id}_{habit['id']}"] = view
+                    polls_sent += 1
+                except discord.Forbidden:
+                    await ctx.followup.send(
+                        "⚠️ I couldn't send you a DM. Please enable DMs from server members.",
+                        ephemeral=True
+                    )
+                    return
+                except Exception as e:
+                    print(f"❌ Error sending test poll: {e}")
+
+            if polls_sent > 0:
+                await ctx.followup.send(f"✅ Successfully sent {polls_sent} test poll(s) to your DMs!", ephemeral=True)
+            else:
+                await ctx.followup.send("❌ Failed to send polls.", ephemeral=True)
+
+        except Exception as e:
+            await ctx.followup.send(f"❌ An error occurred: {e}", ephemeral=True)
 
 
 def setup(bot: discord.Bot):
